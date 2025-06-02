@@ -20,6 +20,15 @@ model.neck.input_shapes = {
 }
 model.neck.in_features = ["p1", "p2", "p3"]
 
+###
+model.dn_number = 600
+# 类别数
+model.num_classes = 558
+
+
 # modify training config
-train.init_checkpoint = "/path/to/convnext_tiny_22k_1k_384.pth"
-train.output_dir = "./output/dino_convnext_tiny_384_4scale_12ep"
+train.init_checkpoint = "/mnt/data/kky/checkpoint/dino_convnext_tiny_384_4scale_12ep.pth"
+train.output_dir = "/mnt/data/kky/output/dino_convnext_tiny_384_4scale_12ep"
+
+# dump the testing results into output_dir for visualization
+dataloader.evaluator.output_dir = train.output_dir

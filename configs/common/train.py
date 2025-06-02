@@ -37,6 +37,7 @@ train = dict(
     log_period=20,
     # logging training info to Wandb
     # note that you should add wandb writer in `train_net.py``
+    # 记录训练过程，类似TensorBoard 
     wandb=dict(
         enabled=False,
         params=dict(

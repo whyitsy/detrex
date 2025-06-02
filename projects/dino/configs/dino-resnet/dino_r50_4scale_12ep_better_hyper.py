@@ -11,7 +11,11 @@ from .dino_r50_4scale_12ep import (
 model.backbone.freeze_at = -1
 
 # more dn queries, set 300 here
-model.dn_number = 300
+# model.dn_number = 300
+
+model.dn_number = 600
+# 类别数
+model.num_classes = 558
 
 # use 2.0 for class weight
 model.criterion.weight_dict = {
@@ -35,4 +39,5 @@ if model.aux_loss:
     model.criterion.weight_dict = weight_dict
 
 # output dir
-train.output_dir = "./output/dino_r50_4scale_12ep_better_hyper"
+train.output_dir = "/mnt/data/kky/output/dino_r50_4scale_12ep_better_hyper"
+train.init_checkpoint = "/mnt/data/kky/checkpoint/R-50.pkl"

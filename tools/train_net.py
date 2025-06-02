@@ -92,6 +92,7 @@ class Trainer(SimpleTrainer):
         If you want to do something with the data, you can wrap the dataloader.
         """
         data = next(self._data_loader_iter)
+        # print(f"@@@@@@@@data:{data}")
         data_time = time.perf_counter() - start
 
         """
