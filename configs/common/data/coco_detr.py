@@ -23,11 +23,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def process_dataset(root_dir:str, dir_list: list[str], label2id_path: str, label_path: str) -> None:
-    """
-    处理原始数据集为框架需要的数据集格式.
-    保证每个目录内的4帧图片顺序, 所以每获取四张图片处理一次就行
-    """
+def process_dataset(root_dir:str, label2id_path: str, label_path: str) -> None:
     # 加载标签映射
     with open(label2id_path, "r", encoding="utf-8") as f:
         label2id = json.load(f)
@@ -37,33 +33,18 @@ def process_dataset(root_dir:str, dir_list: list[str], label2id_path: str, label
     
     output_list = []
     # 遍历根目录
-    for level1_path, _, _ in os.walk(root_dir):
-        for level1_dir in dir_list:
+    for level1_path, level1_dirs, _ in os.walk(root_dir):
+        for level1_dir in level1_dirs:
             for level2_path, _, level2_files in os.walk(os.path.join(level1_path, level1_dir)):  
                     # 获取内层文件夹所有文件并排序
                     sorted_files = sorted(
                         [f for f in level2_files if f.endswith(".json")] ,
                         key=lambda x: int(x.split("_")[2])
                     )
-                    
-                    # 查找参考帧位置
-                    ref_index = next( 
-                        (i for i, f in enumerate(sorted_files) if f.startswith("ref_frame_")),
-                        None
-                    )
-                    if ref_index is None:
-                        continue
-
-                    # ref_index前2帧后1帧, 共4帧
-                    start = max(0, ref_index - 2)
-                    end = min(len(sorted_files), ref_index + 2)  
-                    selected_files = sorted_files[start:end]
-                    if(len(selected_files) < 4):
-                        continue
-                    
+                               
                     
                     # 处理每个文件
-                    for filename in selected_files:
+                    for filename in sorted_files:
 
                         # 初始化当前item
                         item = {
@@ -114,52 +95,33 @@ def calculate_bbox(points: list) -> list:
 
     return [x1, y1, x2, y2]
 
-def train_test_split(root_dir:str, ratio:float=0.8) -> tuple[list, list]:
-    """
-    将数据集划分为训练集和测试集.
-    Args:
-        root_dir: 数据集根目录
-        ratio: 训练集占比, 默认为0.8
-    Returns:
-        tuple: 训练集和测试集的文件列表
-    例如: (train_list, test_list)
-    """
-    for _, input_list, _ in os.walk(root_dir):
+def train_test_split(input_list: list, ratio:int =0.8) -> tuple[list, list]:
 
-        random.shuffle(input_list)
+    random.shuffle(input_list)
+
+    # 计算分割位置
+    split_index = int(len(input_list) * ratio)
     
-        # 计算分割位置
-        split_index = int(len(input_list) * ratio)
-        
-        # 分割列表
-        train_list = input_list[:split_index]
-        test_list = input_list[split_index:]
-        break
+    # 分割列表
+    train_list = input_list[:split_index]
+    test_list = input_list[split_index:]
     
     return train_list, test_list
 
 
 train_list, test_list = train_test_split(
-    root_dir="/mnt/data/datasets/shampoo_datasets",
+    process_dataset(root_dir="/mnt/data/datasets/shampoo_datasets",
+                    label2id_path="/home/kky/detrex/datasets/shampoo/filtered_label2id.json",
+                    label_path="/home/kky/detrex/datasets/shampoo/filtered_label.json"),
     ratio=0.8
 )
 
 
 def shampoo_train_datasets():
-    return process_dataset(
-        root_dir="/mnt/data/datasets/shampoo_datasets",
-        dir_list=train_list,
-        label2id_path="/home/kky/detrex/datasets/shampoo/filtered_label2id.json",
-        label_path="/home/kky/detrex/datasets/shampoo/filtered_label.json"
-    )
+    return train_list
 
 def shampoo_test_datasets():
-    return process_dataset(
-        root_dir="/mnt/data/datasets/shampoo_datasets",
-        dir_list=test_list,
-        label2id_path="/home/kky/detrex/datasets/shampoo/filtered_label2id.json",
-        label_path="/home/kky/detrex/datasets/shampoo/filtered_label.json"
-    )
+    return test_list
     
 from detectron2.data import DatasetCatalog
 DatasetCatalog.register("shampoo_train_datasets", shampoo_train_datasets)
