@@ -6,6 +6,7 @@ from detectron2.data import (
     build_detection_test_loader,
     build_detection_train_loader,
     get_detection_dataset_dicts,
+    build_detection_group_train_loader,
 )
 from detectron2.evaluation import COCOEvaluator
 
@@ -23,7 +24,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def process_dataset(root_dir:str, dir_list: list[str], label2id_path: str, label_path: str) -> None:
+def process_dataset(root_dir:str, pose_info_root:str, dir_list: list[str], label2id_path: str, label_path: str) -> None:
     """
     处理原始数据集为框架需要的数据集格式.
     保证每个目录内的4帧图片顺序, 所以每获取四张图片处理一次就行
@@ -32,6 +33,7 @@ def process_dataset(root_dir:str, dir_list: list[str], label2id_path: str, label
     with open(label2id_path, "r", encoding="utf-8") as f:
         label2id = json.load(f)
     
+    # 加载过滤后的标签
     with open(label_path, "r", encoding="utf-8") as f:
         labels = json.load(f)
     
@@ -39,6 +41,8 @@ def process_dataset(root_dir:str, dir_list: list[str], label2id_path: str, label
     # 遍历根目录
     for level1_path, _, _ in os.walk(root_dir):
         for level1_dir in dir_list:
+            pose_info_file = f"{pose_info_root}/{level1_dir}_transforms.json"
+
             for level2_path, _, level2_files in os.walk(os.path.join(level1_path, level1_dir)):  
                     # 获取内层文件夹所有文件并排序
                     sorted_files = sorted(
@@ -65,13 +69,21 @@ def process_dataset(root_dir:str, dir_list: list[str], label2id_path: str, label
                     # 处理每个文件
                     for filename in selected_files:
 
-                        # 初始化当前item
+                        # 合并位姿信息矩阵
+                        file_frame_index = int(filename.split("_")[2]) # 数据集中的帧序号
+                        with open(pose_info_file, "r", encoding="utf-8") as f:
+                            frame = [ frame for frame in  json.load(f)["frames"] if int(frame["file_path"].split("\\")[-1].split(".")[0].split("_")[-1]) == file_frame_index ]
+                            if not frame or frame["file_path"].split("\\")[-2] != level1_dir:
+                                logger.warning(f"在 {pose_info_file} 中未找到帧索引为 {file_frame_index} 的数据，文件名为: {filename}")
+                                continue
+
                         item = {
                             "file_name": None,
                             "image_id": len(output_list) + 1,
                             "height": None,
                             "width": None,
-                            "annotations": []
+                            "annotations": [],
+                            "transform_matrix": frame["transform_matrix"],
                         }
 
                         file_path = os.path.join(level2_path, filename)
@@ -100,10 +112,10 @@ def process_dataset(root_dir:str, dir_list: list[str], label2id_path: str, label
                                 
                         
                         if item["annotations"]:
-                            output_list.append(item)
-                        
+                            output_list.append(item)                 
     return output_list
 
+# XYXY_ABS
 def calculate_bbox(points: list) -> list:
     x_coords = [p[0] for p in points]
     y_coords = [p[1] for p in points]
@@ -147,7 +159,8 @@ train_list, test_list = train_test_split(
 
 def shampoo_train_datasets():
     return process_dataset(
-        root_dir="/mnt/data/datasets/shampoo_datasets",
+        root_dir="/mnt/data/kky/datasets/shampoo_datasets",
+        pose_info_root="/mnt/data/kky/datasets/pose_info",
         dir_list=train_list,
         label2id_path="/home/kky/detrex/datasets/shampoo/filtered_label2id.json",
         label_path="/home/kky/detrex/datasets/shampoo/filtered_label.json"
@@ -155,7 +168,8 @@ def shampoo_train_datasets():
 
 def shampoo_test_datasets():
     return process_dataset(
-        root_dir="/mnt/data/datasets/shampoo_datasets",
+        root_dir="/mnt/data/kky/datasets/shampoo_datasets",
+        pose_info_root="/mnt/data/kky/datasets/pose_info",
         dir_list=test_list,
         label2id_path="/home/kky/detrex/datasets/shampoo/filtered_label2id.json",
         label_path="/home/kky/detrex/datasets/shampoo/filtered_label.json"
@@ -178,7 +192,8 @@ with open("/home/kky/detrex/datasets/shampoo/filtered_label.json", "r", encoding
 
 dataloader = OmegaConf.create()
 
-dataloader.train = L(build_detection_train_loader)(
+# 这里使用分组打乱的数据加载器
+dataloader.train = L(build_detection_group_train_loader)(
     dataset=L(get_detection_dataset_dicts)(names="shampoo_train_datasets"),
     mapper=L(DetrDatasetMapper)(
         augmentation=[

@@ -67,7 +67,7 @@ class DetrDatasetMapper:
         self.augmentation = augmentation
         self.augmentation_with_crop = augmentation_with_crop
         logging.getLogger(__name__).info(
-            "Full TransformGens used in training: {}, crop: {}".format(
+            "Full TransformGens used in w: {}, crop: {}".format(
                 str(self.augmentation), str(self.augmentation_with_crop)
             )
         )

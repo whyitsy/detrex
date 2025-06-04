@@ -87,19 +87,37 @@ class Trainer(SimpleTrainer):
         assert torch.cuda.is_available(), "[Trainer] CUDA is required for AMP training!"
         from torch.cuda.amp import autocast
 
+        ###############################
+        if not hasattr(self, 'accumulate_counter'):
+            self.accumulate_steps = 4  # 可配置的累积步数
+            self.accumulate_counter = 0
+            self.accumulated_losses = None  # 用于累积损失
+            self.accumulated_result = []  # 用于累积结果
+            self.accumulated_transform_matrix = []  # 用于累积transform_matrix
+        ###############################
+
         start = time.perf_counter()
         """
         If you want to do something with the data, you can wrap the dataloader.
         """
         data = next(self._data_loader_iter)
-        # print(f"@@@@@@@@data:{data}")
+        # 这里data里面应该是是有transform_matrix，且每一组按照顺序[ref-2,ref-1,ref,ref+1]
+        # 需要保存transform_matrix
+        self.accumulated_transform_matrix.append(data.get("transform_matrix", None))
+
         data_time = time.perf_counter() - start
 
+
+      
         """
         If you want to do something with the losses, you can wrap the model.
         """
         with autocast(enabled=self.amp):
-            loss_dict = self.model(data)
+            #####################################
+            # 这里需要和fzt确定返回的是什么？output？results？还是处理过的
+            loss_dict, result = self.model(data)
+            self.accumulated_result.append(result)  # 累积结果
+
             if isinstance(loss_dict, torch.Tensor):
                 losses = loss_dict
                 loss_dict = {"total_loss": loss_dict}
@@ -110,21 +128,37 @@ class Trainer(SimpleTrainer):
         If you need to accumulate gradients or do something similar, you can
         wrap the optimizer with your custom `zero_grad()` method.
         """
-        self.optimizer.zero_grad()
+        # self.optimizer.zero_grad()
+        if self.accumulate_counter == 0:
+            self.optimizer.zero_grad()  # 新累积周期开始时清零梯度
 
-        if self.amp:
-            self.grad_scaler.scale(losses).backward()
-            if self.clip_grad_params is not None:
-                self.grad_scaler.unscale_(self.optimizer)
-                self.clip_grads(self.model.parameters())
-            self.grad_scaler.step(self.optimizer)
-            self.grad_scaler.update()
-        else:
-            losses.backward()
-            if self.clip_grad_params is not None:
-                self.clip_grads(self.model.parameters())
+        losses.backward()
+        self.accumulate_counter += 1
+
+        if self.accumulate_counter % self.accumulate_steps == 0:
             self.optimizer.step()
+            self.accumulate_counter = 0  # 重置计数器
+            
+            ### 这里先调用fzt的处理逻辑，再清空
+            
+            # 还要看情况是否需要参与到损失的计算中
+            self.accumulated_result = []
+            self.accumulated_transform_matrix = []  # 清空transform_matrix
 
+        # if self.amp:
+        #     self.grad_scaler.scale(losses).backward()
+        #     if self.clip_grad_params is not None:
+        #         self.grad_scaler.unscale_(self.optimizer)
+        #         self.clip_grads(self.model.parameters())
+        #     self.grad_scaler.step(self.optimizer)
+        #     self.grad_scaler.update()
+        # else:
+        #     losses.backward()
+        #     if self.clip_grad_params is not None:
+        #         self.clip_grads(self.model.parameters())
+        #     self.optimizer.step()
+
+        # 修改之后记录的指标仍然为单个批次的指标
         self._write_metrics(loss_dict, data_time)
 
     def clip_grads(self, params):

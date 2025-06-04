@@ -8,8 +8,8 @@ lr_multiplier = get_config("common/coco_schedule.py").lr_multiplier_12ep
 train = get_config("common/train.py").train
 
 # # modify training config
-# train.init_checkpoint = "detectron2://ImageNetPretrained/torchvision/R-50.pkl"
-# train.output_dir = "./output/dino_r50_4scale_12ep"
+train.init_checkpoint = "/mnt/data/kky/checkpoint/R-50.pkl"
+train.output_dir = "./output/dino_r50_4scale_12ep"
 
 # max training iterations
 train.max_iter = 90000
