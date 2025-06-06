@@ -126,54 +126,31 @@ def calculate_bbox(points: list) -> list:
 
     return [x1, y1, x2, y2]
 
-def train_test_split(root_dir:str, ratio:float=0.8) -> tuple[list, list]:
-    """
-    将数据集划分为训练集和测试集.
-    Args:
-        root_dir: 数据集根目录
-        ratio: 训练集占比, 默认为0.8
-    Returns:
-        tuple: 训练集和测试集的文件列表
-    例如: (train_list, test_list)
-    """
-    for _, input_list, _ in os.walk(root_dir):
+def train_load(train_dir:str) -> list:
+    with open(train_dir, "r", encoding="utf-8") as f:
+        train_dir_list = json.load(f)
+    return process_dataset("/mnt/data/kky/datasets/shampoo_datasets/",
+                           "/mnt/data/kky/datasets/pose_info/",
+                           train_dir_list,
+                           "/home/kky/detrex/datasets/shampoo/filtered_label2id.json",
+                           "/home/kky/detrex/datasets/shampoo/filtered_label.json"
+                           )
 
-        random.shuffle(input_list)
-    
-        # 计算分割位置
-        split_index = int(len(input_list) * ratio)
-        
-        # 分割列表
-        train_list = input_list[:split_index]
-        test_list = input_list[split_index:]
-        break
-    
-    return train_list, test_list
-
-
-train_list, test_list = train_test_split(
-    root_dir="/mnt/data/datasets/shampoo_datasets",
-    ratio=0.8
-)
-
+def test_load(test_dir:str) -> list:
+    with open(test_dir, "r", encoding="utf-8") as f:
+        test_dir_list = json.load(f)
+    return process_dataset("/mnt/data/kky/datasets/shampoo_datasets/",
+                        "/mnt/data/kky/datasets/pose_info/",
+                        test_dir_list,
+                        "/home/kky/detrex/datasets/shampoo/filtered_label2id.json",
+                        "/home/kky/detrex/datasets/shampoo/filtered_label.json"
+                        )
 
 def shampoo_train_datasets():
-    return process_dataset(
-        root_dir="/mnt/data/kky/datasets/shampoo_datasets",
-        pose_info_root="/mnt/data/kky/datasets/pose_info",
-        dir_list=train_list,
-        label2id_path="/home/kky/detrex/datasets/shampoo/filtered_label2id.json",
-        label_path="/home/kky/detrex/datasets/shampoo/filtered_label.json"
-    )
+    return train_load(train_dir="/mnt/data/kky/datasets/multi_view_train_list.json")
 
 def shampoo_test_datasets():
-    return process_dataset(
-        root_dir="/mnt/data/kky/datasets/shampoo_datasets",
-        pose_info_root="/mnt/data/kky/datasets/pose_info",
-        dir_list=test_list,
-        label2id_path="/home/kky/detrex/datasets/shampoo/filtered_label2id.json",
-        label_path="/home/kky/detrex/datasets/shampoo/filtered_label.json"
-    )
+    return test_load(test_dir="/mnt/data/kky/datasets/multi_view_test_list.json")
     
 from detectron2.data import DatasetCatalog
 DatasetCatalog.register("shampoo_train_datasets", shampoo_train_datasets)
