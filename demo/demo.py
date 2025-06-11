@@ -17,7 +17,17 @@ from detectron2.checkpoint import DetectionCheckpointer
 from detectron2.config import LazyConfig, instantiate
 from detectron2.data.detection_utils import read_image
 from detectron2.utils.logger import setup_logger
+from detectron2.structures import Boxes, Instances
 
+from multi_view_tools.view_align import (
+    XYXY_To_Center,
+    Two_View_Align
+    )
+
+from multi_view_tools.grid_process import (
+    multi_view_grid_process,
+    process_grid_data
+    )
 
 # constants
 WINDOW_NAME = "COCO detections"
@@ -139,6 +149,7 @@ if __name__ == "__main__":
             img = read_image(path, format="BGR")
             start_time = time.time()
             predictions, visualized_output = demo.run_on_image(img, args.confidence_threshold)
+            print("predictions", predictions)
             logger.info(
                 "{}: {} in {:.2f}s".format(
                     path,
@@ -162,6 +173,80 @@ if __name__ == "__main__":
                 cv2.imshow(WINDOW_NAME, visualized_output.get_image()[:, :, ::-1])
                 if cv2.waitKey(0) == 27:
                     break  # esc to quit
+
+    elif args.multi_view_input:
+        """
+        TODO: 将参考帧放在最前面的位置, 确保一组视角中能够确定参考帧的位置。需要修改现在的逻辑
+        TODO: 对final_result进行可视化
+        TODO: 将多视角投票结果与单独视角的结果可视化进行对比
+
+        处理多视角图片, 该参数为一个目录，目录下的每个子目录为一组视角
+        每个子目录下的图片命名格式为 index_xxxx.png, 其中 index 为视角编号
+        """
+        for dirpath, dirnames, _ in os.walk(args.multi_view_input):
+            for dirname in dirnames:
+                for subdirpath, _, img_files_path in os.walk(os.path.join(dirpath, dirname)):
+                    img_files_path = sorted(img_files_path, key=lambda x: int(x.split("_")[0])) # 确保多视角图片的命名格式：index_xxxx.png
+                    start_time = time.time()
+                    multi_view_predictions = []
+                    imgs = []
+
+                    for path in tqdm.tqdm(img_files_path):
+                        sigle_view_result = {}
+                        sigle_view_result["aligned_center_box_points"] = []
+                        # use PIL, to be consistent with evaluation
+                        img = read_image(os.path.join(subdirpath, path), format="BGR")
+                        img_cv2 = cv2.imread(os.path.join(subdirpath, path))
+                        imgs.append(img_cv2)
+                        predictions, visualized_output = demo.run_on_image(img, args.confidence_threshold)
+                        sigle_view_result["num_instances"] = predictions.num_instances
+                        sigle_view_result["image_height"] = predictions.image_height
+                        sigle_view_result["image_width"] = predictions.image_width
+                        pred = {}
+                        pred["pred_boxes"] = predictions.get("pred_boxes").cpu().tolist()
+                        pred["pred_classes"] = predictions.get("pred_classes").tolist()
+                        pred["scores"] = predictions.get("scores").tolist()
+                        sigle_view_result["predictions"] = pred
+                        
+                        multi_view_predictions.append(sigle_view_result)
+                    
+                    # 视角对齐, 返回对齐的物体中心点   
+                    for img, sigle_view_result in zip(imgs, multi_view_predictions):
+                        bboxes_center_to_align = XYXY_To_Center(sigle_view_result["predictions"]["pred_boxes"])
+                        aligned_bboxes_center = Two_View_Align(
+                            imgs[2], img, bboxes_center_to_align
+                        )
+
+                        sigle_view_result["aligned_center_box_points"].append(aligned_bboxes_center)
+                    # 网格化处理+数据综合处理
+                    grid_datas = multi_view_grid_process(multi_view_predictions, grid_size=30)
+                    final_result = process_grid_data(grid_datas)
+
+
+                    logger.info(
+                        "{}: {} in {:.2f}s".format(
+                            path,
+                            "detected {} instances".format(multi_view_predictions["num_instances"])
+                            if "instances" in predictions
+                            else "finished",
+                            time.time() - start_time,
+                        )
+                    )
+
+                    if args.output:
+                        if os.path.isdir(args.output):
+                            assert os.path.isdir(args.output), args.output
+                            out_filename = os.path.join(args.output, os.path.basename(path))
+                        else:
+                            assert len(args.input) == 1, "Please specify a directory with args.output"
+                            out_filename = args.output
+                        visualized_output.save(out_filename)
+                    else:
+                        cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
+                        cv2.imshow(WINDOW_NAME, visualized_output.get_image()[:, :, ::-1])
+                        if cv2.waitKey(0) == 27:
+                            break  # esc to quit
+
     elif args.webcam:
         assert args.input is None, "Cannot have both --input and --webcam!"
         assert args.output is None, "output not yet supported with --webcam!"
