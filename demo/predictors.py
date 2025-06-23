@@ -13,6 +13,7 @@ from detectron2.utils.video_visualizer import VideoVisualizer
 from detectron2.utils.visualizer import ColorMode, Visualizer
 
 
+
 def filter_predictions_with_confidence(predictions, confidence_threshold=0.5):
     if "instances" in predictions:
         preds = predictions["instances"]
@@ -81,6 +82,7 @@ class VisualizationDemo(object):
         predictions = filter_predictions_with_confidence(predictions, threshold)
         # Convert image from OpenCV BGR format to Matplotlib RGB format.
         image = image[:, :, ::-1]
+        # visualizer = Visualizer(image, self.metadata, instance_mode=self.instance_mode)
         visualizer = Visualizer(image, self.metadata, instance_mode=self.instance_mode)
         if "panoptic_seg" in predictions:
             panoptic_seg, segments_info = predictions["panoptic_seg"]

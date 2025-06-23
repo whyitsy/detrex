@@ -1,4 +1,6 @@
 import math
+from multi_view_tools.logger_setup import setup_multi_view_logger
+multi_view_logger = setup_multi_view_logger()
 
 def multi_view_grid_process(multi_view_predictions, grid_size=30):
     """
@@ -15,15 +17,19 @@ def multi_view_grid_process(multi_view_predictions, grid_size=30):
         grid_width = width // grid_size
         grid_height = height // grid_size
         #遍历这张图上模型预测的描框
-        boxes = single_predictions["pred"].boxes #这里的box是(x1, y1, x2, y2)形式
-        scores = single_predictions["pred"].scores #这里的score是每个box的置信度
-        classes = single_predictions["pred"].pred_classes #这里的class是每个box的类别
+        boxes = single_predictions["predictions"]["pred_boxes"] #这里的box是(x1, y1, x2, y2)形式
+        scores = single_predictions["predictions"]["pred_scores"] #这里的score是每个box的置信度
+        classes = single_predictions["predictions"]["pred_classes"] #这里的class是每个box的类别
         aligned_center_points = single_predictions["aligned_center_points"] #这里的center_points是每个box的中心点坐标
 
         grid_data = [[[] for _ in range(grid_width)] for _ in range(grid_height)]#这里使用二维列表结构来存储网格
+        if single_predictions["num_instances"] == 0 or aligned_center_points == []:
+            # 该视角没有需要处理的实例，直接添加空网格数据
+            grid_data_list.append(grid_data)
+            continue
+
         for box, score, class_id, aligned_center_point in zip(boxes, scores, classes, aligned_center_points):#这里是遍历每一张图中每一个检测到的实例
             #现在就是要得到预测点的中心坐标
-           
             cx, cy = aligned_center_point
             
             #计算中心点在网格的位置
@@ -36,17 +42,31 @@ def multi_view_grid_process(multi_view_predictions, grid_size=30):
             
             grid_data[grid_y][grid_x].append(score)
             grid_data[grid_y][grid_x].append(class_id)
-            grid_data[grid_y][grid_x].append(box)
+            # grid_data[grid_y][grid_x].append(box)
+
+            x1,y1,x2,y2 = box
+            height = y2 - y1
+            width = x2 - x1
+            # 使用aligned_center_point来计算边界框
+            bbox = [
+                aligned_center_point[0] - width / 2,  # x1
+                aligned_center_point[1] - height / 2, # y1
+                aligned_center_point[0] + width / 2,  # x2
+                aligned_center_point[1] + height / 2   # y2
+            ]
+            grid_data[grid_y][grid_x].append(bbox)
+
+            grid_data[grid_y][grid_x].append(aligned_center_point)
 
         grid_data_list.append(grid_data)
 
     return grid_data_list  # 返回所有视图的网格数据
 
 
-def process_grid_data(grid_data_list, ref_frame_index=0):
+def process_grid_data(grid_data_list, ref_frame_index):
     """
     处理多维网格数据，实现投票决策功能
-    投票数 > 置信度 > 参考帧顺序
+    投票数 > 参考帧顺序
     
     Args:
         grid_data_list: 四维列表 [视角数][网格高度][网格宽度][预测结果]
@@ -59,6 +79,7 @@ def process_grid_data(grid_data_list, ref_frame_index=0):
         return []
     
     # 获取网格维度信息
+    ref_data_grid = grid_data_list[ref_frame_index]
     view_count = len(grid_data_list)
     grid_height = len(grid_data_list[0])
     grid_width = len(grid_data_list[0][0])
@@ -69,6 +90,10 @@ def process_grid_data(grid_data_list, ref_frame_index=0):
     # 遍历每个网格位置
     for h in range(grid_height):
         for w in range(grid_width):
+            if ref_data_grid[h][w] == []:
+                # multi_view_logger.info(f"参考帧 {ref_frame_index} 在位置 ({h}, {w}) 没有预测结果，跳过该位置。")
+                # 如果参考帧在该位置没有预测结果，跳过
+                continue
             # 收集所有视角在该位置的预测结果
             position_results = []
             for v in range(view_count):
@@ -77,9 +102,9 @@ def process_grid_data(grid_data_list, ref_frame_index=0):
                     continue
                 position_results.append({
                     'view': v,
-                    'label': grid_data_list[v][h][w][0],
-                    'bbox': grid_data_list[v][h][w][1],
-                    'confidence': grid_data_list[v][h][w][2]
+                    'label': grid_data_list[v][h][w][1],
+                    'bbox': grid_data_list[v][h][w][2],
+                    'confidence': grid_data_list[v][h][w][0]
                 })
             
             # 如果没有任何视角有结果，不处理
@@ -107,21 +132,27 @@ def process_grid_data(grid_data_list, ref_frame_index=0):
             if len(candidates) == 1:
                 final_result = candidates[0]
             else:
-                # 多个候选，按置信度排序
-                candidates.sort(key=lambda x: x['confidence'], reverse=True)
-                
-                # 高置信度覆盖低置信度
-                highest_confidence_candidates = [c for c in candidates 
-                                               if c['confidence'] == candidates[0]['confidence']]
-                
-                # 如果仍有多个候选（置信度相同），使用第3帧(参考帧)
-                if len(highest_confidence_candidates) > 1:
-                    ref_candidates = [c for c in highest_confidence_candidates if c['view'] == ref_frame_index]
-                    final_result = ref_candidates[0] if ref_candidates else highest_confidence_candidates[0]
+                # 先判断参考帧是否在
+                ref_candidates = [c for c in candidates if c['view'] == ref_frame_index]
+                if ref_candidates:
+                    # 如果参考帧有结果，直接使用参考帧的结果
+                    final_result = ref_candidates[0]
                 else:
+                    # 没有参考帧，按置信度排序
+                    candidates.sort(key=lambda x: x['confidence'], reverse=True)
+                    
+                    # 高置信度覆盖低置信度
+                    highest_confidence_candidates = [c for c in candidates 
+                                                if c['confidence'] == candidates[0]['confidence']]
+                    
+                    # 如果仍有多个候选，则选择第一个
+                    # TODO: 这里的处理逻辑很简单粗暴，经过前两次过滤后还存在多个候选的情况应该很少
+                    if len(highest_confidence_candidates) > 1:
+                        multi_view_logger.warning(f"位置 ({h}, {w}) 存在多个高置信度候选结果，选择第一个。")
                     final_result = highest_confidence_candidates[0]
             
             # 3. 存储最终结果
-            result_grid[h][w] = [final_result['label'], final_result['bbox'], final_result['confidence']]
-    
+            # TODO: 这里的置信度在最后存在多个候选时也可能存在问题
+            result_grid[h][w] = [final_result['label'], ref_data_grid[h][w][2], final_result['confidence']]
+            
     return result_grid

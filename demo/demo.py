@@ -7,9 +7,9 @@ import os
 import sys
 import tempfile
 import time
-import warnings
 import cv2
 import tqdm
+import json
 
 sys.path.insert(0, "./")  # noqa
 from demo.predictors import VisualizationDemo
@@ -21,13 +21,18 @@ from detectron2.structures import Boxes, Instances
 
 from multi_view_tools.view_align import (
     XYXY_To_Center,
-    Two_View_Align
+    # Two_View_Align
     )
+from multi_view_tools.align import Two_View_Align
 
 from multi_view_tools.grid_process import (
     multi_view_grid_process,
     process_grid_data
     )
+from multi_view_tools.logger_setup import setup_multi_view_logger
+
+from multi_view_tools.visual.visual_outputs import visual_single_view, visual_multi_view_result
+from multi_view_tools.visual.visual_multiple_grids import visualize_multiple_grids
 
 # constants
 WINDOW_NAME = "COCO detections"
@@ -49,6 +54,7 @@ def get_parser():
     )
     parser.add_argument("--webcam", action="store_true", help="Take inputs from webcam.")
     parser.add_argument("--video-input", help="Path to video file.")
+    parser.add_argument("--multi_view_input", type=str, default=None,help="Path to multi-view input directory.")
     parser.add_argument(
         "--input",
         nargs="+",
@@ -176,127 +182,102 @@ if __name__ == "__main__":
 
     elif args.multi_view_input:
         """
-        TODO: 将参考帧放在最前面的位置, 确保一组视角中能够确定参考帧的位置。需要修改现在的逻辑
-        TODO: 对final_result进行可视化
-        TODO: 将多视角投票结果与单独视角的结果可视化进行对比
-
         处理多视角图片, 该参数为一个目录，目录下的每个子目录为一组视角
-        每个子目录下的图片命名格式为 index_xxxx.png, 其中 index 为视角编号
         """
-        for dirpath, dirnames, _ in os.walk(args.multi_view_input):
-            for dirname in dirnames:
-                for subdirpath, _, img_files_path in os.walk(os.path.join(dirpath, dirname)):
-                    img_files_path = sorted(img_files_path, key=lambda x: int(x.split("_")[0])) # 确保多视角图片的命名格式：index_xxxx.png
-                    start_time = time.time()
-                    multi_view_predictions = []
-                    imgs = []
+        top_start_time = time.time()
+        multi_view_logger = setup_multi_view_logger()
+        dirnames = os.listdir(args.multi_view_input)
+        for dirname in dirnames:
+            # 这里不应该使用os.walk遍历，应该直接使用os.listdir遍历子目录下的图片
+            subdirpath = os.path.join(args.multi_view_input, dirname)
+            img_files_path = [f for f in os.listdir(subdirpath) if f.endswith((".jpg", ".png", ".jpeg"))]
+            
+            multi_view_logger.info(f"Processing directory: {subdirpath}")
 
-                    for path in tqdm.tqdm(img_files_path):
-                        sigle_view_result = {}
-                        sigle_view_result["aligned_center_box_points"] = []
-                        # use PIL, to be consistent with evaluation
-                        img = read_image(os.path.join(subdirpath, path), format="BGR")
-                        img_cv2 = cv2.imread(os.path.join(subdirpath, path))
-                        imgs.append(img_cv2)
-                        predictions, visualized_output = demo.run_on_image(img, args.confidence_threshold)
-                        sigle_view_result["num_instances"] = predictions.num_instances
-                        sigle_view_result["image_height"] = predictions.image_height
-                        sigle_view_result["image_width"] = predictions.image_width
-                        pred = {}
-                        pred["pred_boxes"] = predictions.get("pred_boxes").cpu().tolist()
-                        pred["pred_classes"] = predictions.get("pred_classes").tolist()
-                        pred["scores"] = predictions.get("scores").tolist()
-                        sigle_view_result["predictions"] = pred
-                        
-                        multi_view_predictions.append(sigle_view_result)
-                    
-                    # 视角对齐, 返回对齐的物体中心点   
-                    for img, sigle_view_result in zip(imgs, multi_view_predictions):
-                        bboxes_center_to_align = XYXY_To_Center(sigle_view_result["predictions"]["pred_boxes"])
-                        aligned_bboxes_center = Two_View_Align(
-                            imgs[2], img, bboxes_center_to_align
-                        )
+            # img_files_path = sorted(img_files_path, key=lambda x: int(x.split("_")[0])) # 确保多视角图片的命名格式：index_xxxx.png
+            ref_index = [i for i, s in enumerate(img_files_path) if s.startswith("ref_")][0]
+            multi_view_logger.info(f"参考帧下标: {ref_index}")
+            
+            start_time = time.time()
+            multi_view_predictions = []
+            imgs = []
 
-                        sigle_view_result["aligned_center_box_points"].append(aligned_bboxes_center)
-                    # 网格化处理+数据综合处理
-                    grid_datas = multi_view_grid_process(multi_view_predictions, grid_size=30)
-                    final_result = process_grid_data(grid_datas)
+            for i, path in tqdm.tqdm(enumerate(img_files_path), desc="模型运行中..."):
+                sigle_view_result = {}
+                sigle_view_result["aligned_center_points"] = []
+                # use PIL, to be consistent with evaluation
+                img = read_image(os.path.join(subdirpath, path), format="BGR")
+                img_cv2 = cv2.imread(os.path.join(subdirpath, path))
+                imgs.append(img_cv2)
+                predictions, visualized_output = demo.run_on_image(img, args.confidence_threshold)
+                # print("predictions['instances']_type: ", type(predictions["instances"]))
+                # print("predictions['instances']: ", predictions["instances"])
+                sigle_view_result["num_instances"] = len(predictions['instances'])
+                sigle_view_result["image_height"], sigle_view_result["image_width"] = predictions['instances'].image_size
+
+                pred = {}
+                pred["pred_boxes"] = predictions['instances'].pred_boxes.tensor.cpu().numpy().tolist()
+                pred["pred_classes"] = predictions['instances'].pred_classes.cpu().numpy().tolist()
+                pred["pred_scores"] = predictions['instances'].scores.cpu().numpy().tolist()
+                sigle_view_result["predictions"] = pred
+                
+                multi_view_predictions.append(sigle_view_result)
+
+            multi_view_logger.info(f"处理视角数: {len(multi_view_predictions)}")
+            multi_view_logger.info(f"每个视角识别到的实例数: {[result['num_instances'] for result in multi_view_predictions]}")
 
 
-                    logger.info(
-                        "{}: {} in {:.2f}s".format(
-                            path,
-                            "detected {} instances".format(multi_view_predictions["num_instances"])
-                            if "instances" in predictions
-                            else "finished",
-                            time.time() - start_time,
-                        )
-                    )
-
-                    if args.output:
-                        if os.path.isdir(args.output):
-                            assert os.path.isdir(args.output), args.output
-                            out_filename = os.path.join(args.output, os.path.basename(path))
-                        else:
-                            assert len(args.input) == 1, "Please specify a directory with args.output"
-                            out_filename = args.output
-                        visualized_output.save(out_filename)
-                    else:
-                        cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
-                        cv2.imshow(WINDOW_NAME, visualized_output.get_image()[:, :, ::-1])
-                        if cv2.waitKey(0) == 27:
-                            break  # esc to quit
-
-    elif args.webcam:
-        assert args.input is None, "Cannot have both --input and --webcam!"
-        assert args.output is None, "output not yet supported with --webcam!"
-        cam = cv2.VideoCapture(0)
-        for vis in tqdm.tqdm(demo.run_on_video(cam)):
-            cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
-            cv2.imshow(WINDOW_NAME, vis)
-            if cv2.waitKey(1) == 27:
-                break  # esc to quit
-        cam.release()
-        cv2.destroyAllWindows()
-    elif args.video_input:
-        video = cv2.VideoCapture(args.video_input)
-        width = int(video.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(video.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        frames_per_second = video.get(cv2.CAP_PROP_FPS)
-        num_frames = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
-        basename = os.path.basename(args.video_input)
-        codec, file_ext = (
-            ("x264", ".mkv") if test_opencv_video_format("x264", ".mkv") else ("mp4v", ".mp4")
-        )
-        if codec == ".mp4v":
-            warnings.warn("x264 codec not available, switching to mp4v")
-        if args.output:
-            if os.path.isdir(args.output):
-                output_fname = os.path.join(args.output, basename)
-                output_fname = os.path.splitext(output_fname)[0] + file_ext
-            else:
-                output_fname = args.output
-            assert not os.path.isfile(output_fname), output_fname
-            output_file = cv2.VideoWriter(
-                filename=output_fname,
-                # some installation of opencv may not support x264 (due to its license),
-                # you can try other format (e.g. MPEG)
-                fourcc=cv2.VideoWriter_fourcc(*codec),
-                fps=float(frames_per_second),
-                frameSize=(width, height),
-                isColor=True,
+            # 可视化单个视角的识别结果
+            visual_single_view(
+                multi_view_predictions[ref_index]["predictions"],
+                np.copy(imgs[ref_index]),
+                os.path.join(subdirpath, "output", "single_view_result.png")
             )
-        assert os.path.isfile(args.video_input)
-        for vis_frame in tqdm.tqdm(demo.run_on_video(video), total=num_frames):
-            if args.output:
-                output_file.write(vis_frame)
+
+            # 视角对齐, 返回对齐的物体中心点   
+            for img, sigle_view_result in zip(imgs, multi_view_predictions):
+                if sigle_view_result["num_instances"] == 0:
+                    sigle_view_result["aligned_center_points"] = []
+                    continue
+                bboxes_center_to_align = XYXY_To_Center(sigle_view_result["predictions"]["pred_boxes"])
+
+                aligned_bboxes_center = Two_View_Align(
+                    imgs[ref_index], img, bboxes_center_to_align
+                )
+                if isinstance(aligned_bboxes_center, list) and len(aligned_bboxes_center) == 0:
+                    continue  # 如果对齐失败，则跳过该视角
+
+                sigle_view_result["aligned_center_points"] = aligned_bboxes_center.tolist()
+                
+            useful_views = [index for index, result in enumerate(multi_view_predictions) if len(result["aligned_center_points"]) > 0]
+            if len(useful_views) == 1:
+                multi_view_logger.warning(f"{subdirpath} 对齐过滤后只剩下参考帧一帧")
             else:
-                cv2.namedWindow(basename, cv2.WINDOW_NORMAL)
-                cv2.imshow(basename, vis_frame)
-                if cv2.waitKey(1) == 27:
-                    break  # esc to quit
-        video.release()
-        if args.output:
-            output_file.release()
-        else:
-            cv2.destroyAllWindows()
+                multi_view_logger.info(f"{subdirpath} 对齐过滤后剩余视角: f{[useful_views]}")
+                
+            file_path = os.path.join(subdirpath, "output", "single_result.json")
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            with open(file_path, "w", encoding='utf-8') as f:
+                json.dump(multi_view_predictions, f, indent=4)
+                
+            # 网格化处理+数据综合处理
+            grid_datas = multi_view_grid_process(multi_view_predictions, grid_size= 100)
+            
+            final_result = process_grid_data(grid_datas, ref_frame_index=ref_index) # 单个元素[cls, box, score]
+            
+            if not isinstance(subdirpath, str):
+                print(f"警告: subdirpath类型不正确: {type(subdirpath)}")
+            file_path = os.path.join(subdirpath, "output", "final_result.json")
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            with open(file_path, "w", encoding='utf-8') as f:
+                json.dump(final_result, f, indent=4)
+
+            # 可视化多视角对齐后的结果
+            visual_multi_view_result(
+                final_result,
+                np.copy(imgs[ref_index]),
+                os.path.join(subdirpath, "output", "multi_view_result.png")
+            )
+            multi_view_logger.info(f"处理时间: {time.time() - start_time:.2f}秒")          
+                
+        multi_view_logger.info(f"总处理时间: {time.time() - top_start_time:.2f}秒")
