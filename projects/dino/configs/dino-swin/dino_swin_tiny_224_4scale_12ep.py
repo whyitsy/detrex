@@ -15,7 +15,7 @@ train.output_dir = "/mnt/data/kky/output/dino_swin_tiny_224_4scale_12ep"
 dataloader.evaluator.output_dir = train.output_dir
 
 # max training iterations
-train.max_iter = 90000
+train.max_iter = 60000
 train.eval_period = 5000
 train.log_period = 20
 train.checkpointer.period = 5000
@@ -32,7 +32,7 @@ model.device = train.device
 ###
 model.dn_number = 600
 # 类别数
-model.num_classes = 558
+model.num_classes = 1040
 
 # modify optimizer config
 optimizer.lr = 1e-4

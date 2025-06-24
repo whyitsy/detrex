@@ -19,11 +19,45 @@ def setup_multi_view_logger(log_file="./output/multi_view.log"):
         # 创建格式化器并添加到处理器
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
         file_handler.setFormatter(formatter)
+
+        # 如果需要控制台输出，可以添加StreamHandler
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.INFO)  # 控制台输出INFO级别及以上
+        console_handler.setFormatter(formatter)
         
         # 添加处理器到logger
         logger.addHandler(file_handler)
+        logger.addHandler(console_handler)
     
     return logger
+
+def setup_dataset_logger(log_file="./output/dataset.log"):
+    """
+    设置数据集处理的日志记录器，默认写入指定的日志文件。
+    """
+    dataset_logger = logging.getLogger("dataset_logger")
+    dataset_logger.setLevel(logging.INFO)  # 设置日志级别为INFO及以上
+    
+    # 确保不会有重复的处理器
+    if not dataset_logger.handlers:
+        # 创建文件处理器
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setLevel(logging.INFO)
+        
+        # 创建格式化器并添加到处理器
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        file_handler.setFormatter(formatter)
+
+        # 如果需要控制台输出，可以添加StreamHandler
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.INFO)  # 控制台输出WARNING级别及以上
+        console_handler.setFormatter(formatter)
+        
+        # 添加处理器到logger
+        dataset_logger.addHandler(file_handler)
+        dataset_logger.addHandler(console_handler)
+    
+    return dataset_logger
 
 # 使用示例
 if __name__ == "__main__":

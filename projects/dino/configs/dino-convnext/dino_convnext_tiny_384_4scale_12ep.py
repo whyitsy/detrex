@@ -23,7 +23,7 @@ model.neck.in_features = ["p1", "p2", "p3"]
 ###
 model.dn_number = 600
 # 类别数
-model.num_classes = 558
+model.num_classes = 1040
 
 
 # modify training config
