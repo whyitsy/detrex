@@ -1,0 +1,18 @@
+Alignment Results Summary:
+    
+=== LightGlue ===
+Average Error: 10.40 pixels
+Median Error: 7.40 pixels
+Max Error: 153.13 pixels
+Number of Matches: 1737
+
+=== SIFT ===
+Average Error: 171.13 pixels
+Median Error: 4.31 pixels
+Max Error: 3018.02 pixels
+Number of Matches: 6323
+
+Conclusion:
+LightGlue outperforms SIFT with:
+- 6.1% of the average error
+- 171.4% of the median error

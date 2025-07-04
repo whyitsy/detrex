@@ -1,0 +1,28 @@
+{
+    "bert_path": "/mnt/data/hanhan372/bert",
+    "data_root": "/mnt/data/datasets/shampoo_FGVCdataset",
+    "num_workers": 4,
+    "batch_size": 256,
+    "log_file_path": "./log/原始FGVC_train.log",
+    "model_save_path": "/mnt/data/hanhan372/GoogleNet/best_fusion_shampoo_FGVCdataset.pth",
+    "pretrained_model_path": "/mnt/data/hanhan372/GoogleNet/GoogleNet_pretrained_model_shampooFGVC1039.pth",
+    "class_indices_path": "GoogleNet/class_indices.json",
+    "device": "cuda:3",
+    "learning_rates": {
+        "img_backbone": 8e-4,  
+        "classifier": 8e-4, 
+        "gate": 4e-5,       
+        "txt_encoder": 4e-5, 
+        "txt_proj": 4e-5    
+    },
+    "weight_decay": 1e-2,
+    "scheduler": {
+        "step_size": 20,
+        "gamma": 0.1
+    },
+    "training": {
+        "epochs": 120,
+        "txt_dropout_p": 0.3,
+        "freeze_text_epochs": 5
+    }
+}
