@@ -8,6 +8,7 @@ outputs/
 output/
 inputs/
 inputss/
+demo_test/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

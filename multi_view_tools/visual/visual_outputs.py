@@ -29,7 +29,7 @@ def visual_single_view(data, img, output_path):
     bboxes, classes, scores = data['pred_boxes'], data['pred_classes'], data['pred_scores']
 
     # 将classes转为labels
-    labels_path = "/home/kky/detrex/datasets/shampoo/filtered_label.json"
+    labels_path = "/home/kky/detrex/datasets/shampoo_new/4-filtered_label.json"
     with open(labels_path, 'r') as f:
         labels_id = json.load(f)
         labels = [labels_id[cls] for cls in classes]
@@ -73,20 +73,32 @@ def visual_multi_view_result(data, img, output_path):
     # 选择一个支持中文的字体路径
     font_path = "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"  # 请根据实际环境修改字体路径
     font = ImageFont.truetype(font_path, 20)
+    small_font = ImageFont.truetype(font_path, 16)  # 用于标记的小字体
 
     # 将classes转为labels
-    labels_path = "/home/kky/detrex/datasets/shampoo/filtered_label.json"
+    labels_path = "/home/kky/detrex/datasets/shampoo_new/4-filtered_label.json"
     with open(labels_path, 'r') as f:
         labels_id = json.load(f)
 
-    data_grid, data_list = filter_by_top_left(data, iou_threshold=0.2)  # 过滤重叠检测结果
+    # 标记颜色配置
+    FLAG_COLORS = {
+        'diff_label_flag': (255, 0, 0),      # 红色表示标签差异
+        'diff_score_flag': (0, 0, 255),      # 蓝色表示分数差异
+        'diff_all_flag': (255, 255, 0)       # 黄色表示全部差异
+    }
+
     # 记录有数据的坐标
-    exist_data = [(x, y, cell) for x, row in enumerate(data_grid) for y, cell in enumerate(row) if cell]  # 仅当 cell 非空时保留
+    exist_data = [(x, y, cell) for x, row in enumerate(data) for y, cell in enumerate(row) if cell]  # 仅当 cell 非空时保留
     multi_view_logger.info(f"处理后有{len(exist_data)}个网格有内容")    
-    for i, view_data in enumerate(data_grid):
+    for i, view_data in enumerate(data):
         for j, item in enumerate(view_data):
             if item:
                 cls, score, bbox = item[0], item[2], item[1]
+                # 提取三个标记
+                diff_label_flag = item[3]
+                diff_score_flag = item[4]
+                diff_all_flag = item[5]
+                
                 label = labels_id[cls]
                 bbox = np.array(bbox, dtype=np.int32)
                 # 根据标签获取固定颜色
@@ -97,6 +109,27 @@ def visual_multi_view_result(data, img, output_path):
                 
                 # 用PIL绘制中文（文本颜色与框颜色一致）
                 draw.text((bbox[0], bbox[1] - 25), f"{label} {score:.2f}", font=font, fill=color)
+                
+                # 绘制标记
+                flag_positions = [
+                    (bbox[0], bbox[1] - 45),       # 左上位置显示diff_label_flag
+                    (bbox[2] - 20, bbox[1] - 45),  # 右上位置显示diff_score_flag
+                    (bbox[0], bbox[3] + 5)          # 左下位置显示diff_all_flag
+                ]
+                
+                # 标记文本和颜色映射
+                flags = [
+                    (diff_label_flag, "L", FLAG_COLORS['diff_label_flag']),
+                    (diff_score_flag, "S", FLAG_COLORS['diff_score_flag']),
+                    (diff_all_flag, "A", FLAG_COLORS['diff_all_flag'])
+                ]
+                
+                # 绘制标记
+                for flag_value, flag_text, flag_color in flags:
+                    if flag_value:
+                        x, y = flag_positions[flags.index((flag_value, flag_text, flag_color))]
+                        draw.rectangle([(x, y), (x + 20, y + 20)], fill=flag_color)
+                        draw.text((x + 5, y + 2), flag_text, font=small_font,)
     
     # 保存图片
     img = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)

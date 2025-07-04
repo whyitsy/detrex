@@ -71,7 +71,7 @@ def process_grid_data(grid_data_list, ref_frame_index):
     Args:
         grid_data_list: 四维列表 [视角数][网格高度][网格宽度][预测结果]
                 预测结果格式: [标签, 边界框(bbox), 置信度]
-    
+    [score, class_id, bbox(x1,y1,x2,y2)]
     Returns:
         处理后的单个视角结果 [网格高度][网格宽度][预测结果]
     """
@@ -90,6 +90,9 @@ def process_grid_data(grid_data_list, ref_frame_index):
     # 遍历每个网格位置
     for h in range(grid_height):
         for w in range(grid_width):
+            diff_label_flag = False
+            diff_score_flag = False
+            diff_all_flag = False
             if ref_data_grid[h][w] == []:
                 # multi_view_logger.info(f"参考帧 {ref_frame_index} 在位置 ({h}, {w}) 没有预测结果，跳过该位置。")
                 # 如果参考帧在该位置没有预测结果，跳过
@@ -127,32 +130,44 @@ def process_grid_data(grid_data_list, ref_frame_index):
             # 2. 校准处理：处理冲突情况
             # 筛选出得票最多的标签的所有结果
             candidates = [r for r in position_results if r['label'] == most_voted_label]
-            
-            # 如果只有一个候选，直接使用
+             
+            # 如果只有一个候选，则是参考帧的结果，直接使用
             if len(candidates) == 1:
                 final_result = candidates[0]
             else:
-                # 先判断参考帧是否在
-                ref_candidates = [c for c in candidates if c['view'] == ref_frame_index]
-                if ref_candidates:
-                    # 如果参考帧有结果，直接使用参考帧的结果
-                    final_result = ref_candidates[0]
+                # 置信度排序
+                candidates.sort(key=lambda x: x['confidence'], reverse=True)
+                
+                # 高置信度覆盖低置信度
+                highest_confidence_candidates = [c for c in candidates 
+                                            if c['confidence'] == candidates[0]['confidence']]
+                
+                # 如果仍有多个候选，则选择第一个
+                # TODO: 这里的处理逻辑很简单粗暴，经过前两次过滤后还存在多个候选的情况应该很少
+                if len(highest_confidence_candidates) > 1:
+                    multi_view_logger.warning(f"位置 ({h}, {w}) 存在多个高置信度候选结果，选择第一个。")
+                final_result = highest_confidence_candidates[0]
+                
+                if final_result['view'] != ref_frame_index:
+                    # 记录标签或置信度不一致的情况
+                    if final_result['label'] != ref_data_grid[h][w][1] or final_result['confidence'] != ref_data_grid[h][w][0]:
+                        multi_view_logger.info(
+                            f"位置 ({h}, {w}) 的最终结果与参考帧存在差异 - "
+                            f"标签: {final_result['label']} vs {ref_data_grid[h][w][1]}, "
+                            f"置信度: {final_result['confidence']} vs {ref_data_grid[h][w][0]}"
+                        )
+                    if final_result['label'] != ref_data_grid[h][w][1]:
+                        diff_label_flag = True
+                    if final_result['confidence'] != ref_data_grid[h][w][0]:
+                        diff_score_flag = True
+                    if diff_label_flag and diff_score_flag:
+                        diff_all_flag = True
                 else:
-                    # 没有参考帧，按置信度排序
-                    candidates.sort(key=lambda x: x['confidence'], reverse=True)
-                    
-                    # 高置信度覆盖低置信度
-                    highest_confidence_candidates = [c for c in candidates 
-                                                if c['confidence'] == candidates[0]['confidence']]
-                    
-                    # 如果仍有多个候选，则选择第一个
-                    # TODO: 这里的处理逻辑很简单粗暴，经过前两次过滤后还存在多个候选的情况应该很少
-                    if len(highest_confidence_candidates) > 1:
-                        multi_view_logger.warning(f"位置 ({h}, {w}) 存在多个高置信度候选结果，选择第一个。")
-                    final_result = highest_confidence_candidates[0]
+                    multi_view_logger.info(f"位置 ({h}, {w}) 的最终结果来自参考帧 {ref_frame_index}。")
             
             # 3. 存储最终结果
             # TODO: 这里的置信度在最后存在多个候选时也可能存在问题
-            result_grid[h][w] = [final_result['label'], ref_data_grid[h][w][2], final_result['confidence']]
+            result_grid[h][w] = [final_result['label'], ref_data_grid[h][w][2], final_result['confidence'], diff_label_flag, diff_score_flag, diff_all_flag]
+
             
     return result_grid

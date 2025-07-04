@@ -208,6 +208,7 @@ if __name__ == "__main__":
                 # use PIL, to be consistent with evaluation
                 img = read_image(os.path.join(subdirpath, path), format="BGR")
                 img_cv2 = cv2.imread(os.path.join(subdirpath, path))
+                
                 imgs.append(img_cv2)
                 predictions, visualized_output = demo.run_on_image(img, args.confidence_threshold)
                 # print("predictions['instances']_type: ", type(predictions["instances"]))
@@ -264,6 +265,10 @@ if __name__ == "__main__":
             grid_datas = multi_view_grid_process(multi_view_predictions, grid_size= 100)
             
             final_result = process_grid_data(grid_datas, ref_frame_index=ref_index) # 单个元素[cls, box, score]
+
+            ## 遍历final_result，将score小于阈值的元素的框截取下来作为小模型的输入
+            
+
             
             if not isinstance(subdirpath, str):
                 print(f"警告: subdirpath类型不正确: {type(subdirpath)}")
