@@ -11,6 +11,8 @@ import cv2
 import tqdm
 import json
 
+from GoogleNet.predict import ImagePredictor
+
 sys.path.insert(0, "./")  # noqa
 from demo.predictors import VisualizationDemo
 from detectron2.checkpoint import DetectionCheckpointer
@@ -18,6 +20,7 @@ from detectron2.config import LazyConfig, instantiate
 from detectron2.data.detection_utils import read_image
 from detectron2.utils.logger import setup_logger
 from detectron2.structures import Boxes, Instances
+
 
 from multi_view_tools.view_align import (
     XYXY_To_Center,
@@ -101,6 +104,12 @@ def get_parser():
         help="Modify config options using the command-line",
         default=None,
         nargs=argparse.REMAINDER,
+    )
+    parser.add_argument(
+        "--call-threshold",
+        type=float,
+        default=0.8,
+        help="置信度低于0.8的物体将调用小模型进行识别",
     )
     return parser
 
@@ -187,6 +196,7 @@ if __name__ == "__main__":
         top_start_time = time.time()
         multi_view_logger = setup_multi_view_logger()
         dirnames = os.listdir(args.multi_view_input)
+        googlenet_predictor = ImagePredictor()
         for dirname in dirnames:
             # 这里不应该使用os.walk遍历，应该直接使用os.listdir遍历子目录下的图片
             subdirpath = os.path.join(args.multi_view_input, dirname)
@@ -235,16 +245,23 @@ if __name__ == "__main__":
                 os.path.join(subdirpath, "output", "single_view_result.png")
             )
 
-            # 视角对齐, 返回对齐的物体中心点   
-            for img, sigle_view_result in zip(imgs, multi_view_predictions):
+            # 视角对齐, 返回对齐的物体中心点
+            for index, img, sigle_view_result in enumerate(zip(imgs, multi_view_predictions)):
                 if sigle_view_result["num_instances"] == 0:
                     sigle_view_result["aligned_center_points"] = []
                     continue
                 bboxes_center_to_align = XYXY_To_Center(sigle_view_result["predictions"]["pred_boxes"])
 
-                aligned_bboxes_center = Two_View_Align(
-                    imgs[ref_index], img, bboxes_center_to_align
-                )
+                if index < ref_index:
+                    aligned_bboxes_center = Two_View_Align(
+                        imgs[index+1], img, bboxes_center_to_align
+                    )
+                elif index == ref_index:
+                    aligned_bboxes_center = bboxes_center_to_align
+                else:
+                    aligned_bboxes_center = Two_View_Align(
+                        imgs[index-1], img, bboxes_center_to_align
+                    )
                 if isinstance(aligned_bboxes_center, list) and len(aligned_bboxes_center) == 0:
                     continue  # 如果对齐失败，则跳过该视角
 
@@ -267,9 +284,32 @@ if __name__ == "__main__":
             final_result = process_grid_data(grid_datas, ref_frame_index=ref_index) # 单个元素[cls, box, score]
 
             ## 遍历final_result，将score小于阈值的元素的框截取下来作为小模型的输入
-            
+            low_confidence_bbox = []
+            for i, result in enumerate(final_result):
+                for j, item in enumerate(result):
+                    if item[2] < args.confidence_threshold:
+                        low_confidence_bbox.append({
+                            "grid_row": i,
+                            "grid_col": j,
+                            "label": item[0],
+                            "bbox": item[1],   
+                            "score": item[2],
+                        })
 
+            # 从参考帧中截取低置信度的框
+            low_confidence_images = []
+            for item in low_confidence_bbox:
+                cropped_img = imgs[ref_index][item['bbox'][1]:item['bbox'][3], item['bbox'][0]:item['bbox'][2]]
+                low_confidence_images.append(cropped_img)
             
+            # 调用小模型进行预测
+            batch_res = googlenet_predictor.predict_batch(low_confidence_images)
+            
+            # 将两个结果进行对比
+            for i, item in enumerate(low_confidence_bbox):
+                if batch_res[i]['predicted_class_id']:
+                    print(f"dino_label: {item['label']}, googlenet_label: {batch_res[i]['predicted_class_id']}, dino_score: {item['score']}, googlenet_score: {batch_res[i]['confidence']}")
+
             if not isinstance(subdirpath, str):
                 print(f"警告: subdirpath类型不正确: {type(subdirpath)}")
             file_path = os.path.join(subdirpath, "output", "final_result.json")

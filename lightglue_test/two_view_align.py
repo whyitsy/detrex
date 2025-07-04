@@ -4,7 +4,7 @@ import torch
 from lightglue import LightGlue, SuperPoint
 from lightglue.utils import load_image, rbd
 import kornia as K
-
+import matplotlib.pyplot as plt
 def Two_View_Align_LightGlue(ref_view, view_to_align, bboxes_center_to_align: list[tuple[float, float]],
                            ransac_iterations=2000, ransac_threshold=2.0,
                            spatial_ratio_threshold=1.2, device='cuda'):
@@ -85,11 +85,12 @@ def filter_matches_by_spatial_consistency(src_pts, dst_pts, max_ratio=1.2):
     mask = mask.mean(axis=1) > 0.7
     return src_pts[mask], dst_pts[mask]
 
+
 # 使用示例
 if __name__ == "__main__":
     # 读取图像
-    ref_img = cv2.imread("reference.jpg")
-    align_img = cv2.imread("target.jpg")
+    ref_img = cv2.imread("/home/kky/detrex/lightglue_test/data/before_frame_000197_angle_20.04.png")
+    align_img = cv2.imread("/home/kky/detrex/lightglue_test/data/before_frame_000223_angle_14.94.png")
     
     # 模拟一些需要对齐的bbox中心点
     bbox_centers = [(100, 200), (150, 300), (200, 400)]
@@ -101,4 +102,8 @@ if __name__ == "__main__":
         ransac_threshold=1.5
     )
     
+    #aligned_points_new = np.array([[244.62, 212.19], [287.26, 307.05], [329.97, 402.08]])
     print("对齐后的坐标:", aligned_points)
+    
+
+
