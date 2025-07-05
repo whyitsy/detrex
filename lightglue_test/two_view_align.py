@@ -5,6 +5,7 @@ from lightglue import LightGlue, SuperPoint
 from lightglue.utils import load_image, rbd
 import kornia as K
 import matplotlib.pyplot as plt
+
 def Two_View_Align_LightGlue(ref_view, view_to_align, bboxes_center_to_align: list[tuple[float, float]],
                            ransac_iterations=2000, ransac_threshold=2.0,
                            spatial_ratio_threshold=1.2, device='cuda'):

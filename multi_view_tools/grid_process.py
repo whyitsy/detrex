@@ -23,7 +23,7 @@ def multi_view_grid_process(multi_view_predictions, grid_size=30):
         aligned_center_points = single_predictions["aligned_center_points"] #这里的center_points是每个box的中心点坐标
 
         grid_data = [[[] for _ in range(grid_width)] for _ in range(grid_height)]#这里使用二维列表结构来存储网格
-        if single_predictions["num_instances"] == 0 or aligned_center_points == []:
+        if single_predictions["num_instances"] == 0 or aligned_center_points.size == 0:
             # 该视角没有需要处理的实例，直接添加空网格数据
             grid_data_list.append(grid_data)
             continue

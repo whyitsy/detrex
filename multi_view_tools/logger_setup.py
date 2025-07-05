@@ -1,13 +1,13 @@
 import logging
 
 # 配置日志记录
-def setup_multi_view_logger(log_file="./output/multi_view.log"):
+def setup_multi_view_logger(log_file="./output/multi_view-lightglue.log"):
     """
     设置日志记录器，默认写入指定的日志文件。
     默认level为DEBUG，输出格式为时间戳、日志名称、日志级别和消息内容。
     """
     logger = logging.getLogger("multi_view_logger")
-    logger.setLevel(logging.DEBUG)  # 设置日志级别为INFO及以上
+    logger.setLevel(logging.INFO)  # 设置日志级别为INFO及以上
     
     # 确保不会有重复的处理器
     # 默认是没有处理器的, 不添加则不会输出到任何地方

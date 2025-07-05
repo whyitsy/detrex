@@ -22,11 +22,8 @@ from detectron2.utils.logger import setup_logger
 from detectron2.structures import Boxes, Instances
 
 
-from multi_view_tools.view_align import (
-    XYXY_To_Center,
-    # Two_View_Align
-    )
-from multi_view_tools.align import Two_View_Align
+from multi_view_tools.align import  XYXY_To_Center, Two_View_Align
+from lightglue_test.two_view_align import Two_View_Align_LightGlue
 
 from multi_view_tools.grid_process import (
     multi_view_grid_process,
@@ -46,6 +43,11 @@ def setup(args):
     cfg = LazyConfig.apply_overrides(cfg, args.opts)
     return cfg
 
+class NumpyEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return super(NumpyEncoder, self).default(obj)
 
 def get_parser():
     parser = argparse.ArgumentParser(description="detrex demo for visualizing customized inputs")
@@ -106,7 +108,7 @@ def get_parser():
         nargs=argparse.REMAINDER,
     )
     parser.add_argument(
-        "--call-threshold",
+        "--call_threshold",
         type=float,
         default=0.8,
         help="置信度低于0.8的物体将调用小模型进行识别",
@@ -202,10 +204,11 @@ if __name__ == "__main__":
             subdirpath = os.path.join(args.multi_view_input, dirname)
             img_files_path = [f for f in os.listdir(subdirpath) if f.endswith((".jpg", ".png", ".jpeg"))]
             
+            img_files_path = sorted(img_files_path, key=lambda x: int(x.split("_")[-3]))  # 按照文件名中的数字排序
             multi_view_logger.info(f"Processing directory: {subdirpath}")
 
-            # img_files_path = sorted(img_files_path, key=lambda x: int(x.split("_")[0])) # 确保多视角图片的命名格式：index_xxxx.png
-            ref_index = [i for i, s in enumerate(img_files_path) if s.startswith("ref_")][0]
+
+            ref_index = [i for i, s in enumerate(img_files_path) if s.startswith("ref_frame")][0]
             multi_view_logger.info(f"参考帧下标: {ref_index}")
             
             start_time = time.time()
@@ -221,6 +224,7 @@ if __name__ == "__main__":
                 
                 imgs.append(img_cv2)
                 predictions, visualized_output = demo.run_on_image(img, args.confidence_threshold)
+
                 # print("predictions['instances']_type: ", type(predictions["instances"]))
                 # print("predictions['instances']: ", predictions["instances"])
                 sigle_view_result["num_instances"] = len(predictions['instances'])
@@ -238,34 +242,45 @@ if __name__ == "__main__":
             multi_view_logger.info(f"每个视角识别到的实例数: {[result['num_instances'] for result in multi_view_predictions]}")
 
 
-            # 可视化单个视角的识别结果
+            # 可视化参考帧视角的识别结果
             visual_single_view(
                 multi_view_predictions[ref_index]["predictions"],
                 np.copy(imgs[ref_index]),
                 os.path.join(subdirpath, "output", "single_view_result.png")
             )
 
+            # 存储每一步的对齐结果
+            iteration_results = []
             # 视角对齐, 返回对齐的物体中心点
-            for index, img, sigle_view_result in enumerate(zip(imgs, multi_view_predictions)):
+            for index, (img, sigle_view_result) in enumerate(zip(imgs, multi_view_predictions)):
                 if sigle_view_result["num_instances"] == 0:
                     sigle_view_result["aligned_center_points"] = []
                     continue
+
                 bboxes_center_to_align = XYXY_To_Center(sigle_view_result["predictions"]["pred_boxes"])
+                
+                # 添加第一个视角的预测结果的中心点
+                if index == 0:
+                    iteration_results.append(bboxes_center_to_align)
 
                 if index < ref_index:
-                    aligned_bboxes_center = Two_View_Align(
+                    aligned_bboxes_center = Two_View_Align_LightGlue(
                         imgs[index+1], img, bboxes_center_to_align
                     )
                 elif index == ref_index:
                     aligned_bboxes_center = bboxes_center_to_align
                 else:
-                    aligned_bboxes_center = Two_View_Align(
+                    aligned_bboxes_center = Two_View_Align_LightGlue(
                         imgs[index-1], img, bboxes_center_to_align
                     )
+                
+                
+
+                    
                 if isinstance(aligned_bboxes_center, list) and len(aligned_bboxes_center) == 0:
                     continue  # 如果对齐失败，则跳过该视角
 
-                sigle_view_result["aligned_center_points"] = aligned_bboxes_center.tolist()
+                sigle_view_result["aligned_center_points"] = aligned_bboxes_center
                 
             useful_views = [index for index, result in enumerate(multi_view_predictions) if len(result["aligned_center_points"]) > 0]
             if len(useful_views) == 1:
@@ -276,7 +291,7 @@ if __name__ == "__main__":
             file_path = os.path.join(subdirpath, "output", "single_result.json")
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
             with open(file_path, "w", encoding='utf-8') as f:
-                json.dump(multi_view_predictions, f, indent=4)
+                json.dump(multi_view_predictions, f, indent=4, cls=NumpyEncoder)
                 
             # 网格化处理+数据综合处理
             grid_datas = multi_view_grid_process(multi_view_predictions, grid_size= 100)
@@ -287,7 +302,7 @@ if __name__ == "__main__":
             low_confidence_bbox = []
             for i, result in enumerate(final_result):
                 for j, item in enumerate(result):
-                    if item[2] < args.confidence_threshold:
+                    if item[2] < args.call_threshold:
                         low_confidence_bbox.append({
                             "grid_row": i,
                             "grid_col": j,
@@ -315,7 +330,7 @@ if __name__ == "__main__":
             file_path = os.path.join(subdirpath, "output", "final_result.json")
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
             with open(file_path, "w", encoding='utf-8') as f:
-                json.dump(final_result, f, indent=4)
+                json.dump(final_result, f, indent=4, cls=NumpyEncoder)
 
             # 可视化多视角对齐后的结果
             visual_multi_view_result(
